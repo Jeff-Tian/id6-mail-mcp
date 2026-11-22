@@ -23,58 +23,97 @@ public static class SetupCommand
             return 1;
         }
 
-        if (Console.IsInputRedirected)
+        if (!TryOpenTerminal(out var input, out var output, out var tty))
         {
             Console.Error.WriteLine("Non-interactive session; run `id6-mail-mcp setup` from a terminal to choose clients.");
             return 0;
         }
 
-        Console.WriteLine("Add the id6-mail MCP server to:");
-        for (var i = 0; i < clients.Count; i++)
-            Console.WriteLine($"  {i + 1}) {clients[i].Name}");
-        Console.Write("Select clients (comma-separated, or 'all'; Enter to skip): ");
-
-        var selected = ParseSelection(Console.ReadLine(), clients.Count);
-        if (selected.Count == 0)
+        try
         {
-            Console.WriteLine("Skipped.");
-            return 0;
+            output.WriteLine("Add the id6-mail MCP server to:");
+            for (var i = 0; i < clients.Count; i++)
+                output.WriteLine($"  {i + 1}) {clients[i].Name}");
+            output.Write("Select clients (comma-separated, or 'all'; Enter to skip): ");
+
+            var selected = ParseSelection(input.ReadLine(), clients.Count);
+            if (selected.Count == 0)
+            {
+                output.WriteLine("Skipped.");
+                return 0;
+            }
+
+            var payload = BuildPayload(command);
+            var failed = false;
+            foreach (var index in selected)
+            {
+                var client = clients[index];
+                output.WriteLine($"Configuring {client.Name}...");
+                try
+                {
+                    var startInfo = new ProcessStartInfo(client.Cli) { UseShellExecute = false };
+                    startInfo.ArgumentList.Add("--add-mcp");
+                    startInfo.ArgumentList.Add(payload);
+                    using var process = Process.Start(startInfo);
+                    if (process is null)
+                    {
+                        failed = true;
+                        output.WriteLine($"Failed to start {client.Name}.");
+                        continue;
+                    }
+
+                    process.WaitForExit();
+                    if (process.ExitCode != 0)
+                    {
+                        failed = true;
+                        output.WriteLine($"{client.Name} exited with code {process.ExitCode}.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    failed = true;
+                    output.WriteLine($"Could not configure {client.Name}: {ex.Message}");
+                }
+            }
+
+            return failed ? 1 : 0;
         }
-
-        var payload = BuildPayload(command);
-        var failed = false;
-        foreach (var index in selected)
+        finally
         {
-            var client = clients[index];
-            Console.WriteLine($"Configuring {client.Name}...");
+            tty?.Dispose();
+        }
+    }
+
+    private static bool TryOpenTerminal(out TextReader input, out TextWriter output, out FileStream? tty)
+    {
+        tty = null;
+        if (!OperatingSystem.IsWindows())
+        {
             try
             {
-                var startInfo = new ProcessStartInfo(client.Cli) { UseShellExecute = false };
-                startInfo.ArgumentList.Add("--add-mcp");
-                startInfo.ArgumentList.Add(payload);
-                using var process = Process.Start(startInfo);
-                if (process is null)
-                {
-                    failed = true;
-                    Console.Error.WriteLine($"Failed to start {client.Name}.");
-                    continue;
-                }
-
-                process.WaitForExit();
-                if (process.ExitCode != 0)
-                {
-                    failed = true;
-                    Console.Error.WriteLine($"{client.Name} exited with code {process.ExitCode}.");
-                }
+                tty = new FileStream("/dev/tty", FileMode.Open, FileAccess.ReadWrite);
+                input = new StreamReader(tty);
+                output = new StreamWriter(tty) { AutoFlush = true };
+                return true;
             }
-            catch (Exception ex)
+            catch (IOException)
             {
-                failed = true;
-                Console.Error.WriteLine($"Could not configure {client.Name}: {ex.Message}");
+            }
+            catch (UnauthorizedAccessException)
+            {
             }
         }
 
-        return failed ? 1 : 0;
+        if (!Console.IsInputRedirected)
+        {
+            input = Console.In;
+            output = Console.Out;
+            return true;
+        }
+
+        input = TextReader.Null;
+        output = TextWriter.Null;
+        return false;
     }
 
     public static IReadOnlyList<int> ParseSelection(string? input, int count)
