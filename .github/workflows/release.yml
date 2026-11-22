@@ -1,0 +1,134 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Test
+        run: dotnet test tests/Id6Mail.Mcp.Tests/Id6Mail.Mcp.Tests.csproj --configuration Release
+
+      - name: Self-test version script
+        run: bash .github/scripts/next-version.sh --self-test
+
+      - name: Compute next version
+        id: version
+        run: |
+          set -euo pipefail
+          fallback="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' src/Id6Mail.Mcp/Id6Mail.Mcp.csproj | head -1)"
+          if [ -z "$fallback" ]; then
+            echo "::error::No <Version> found in src/Id6Mail.Mcp/Id6Mail.Mcp.csproj"
+            exit 1
+          fi
+          next="$(bash .github/scripts/next-version.sh "$fallback")"
+          if [ -z "$next" ]; then
+            echo "::notice::No releasable commits since the last v* tag — nothing to publish"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git rev-parse -q --verify "refs/tags/v$next" >/dev/null; then
+            echo "::notice::Tag v$next already exists — nothing to publish"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "release=true" >> "$GITHUB_OUTPUT"
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+          echo "Next version: $next"
+
+      - name: Check NuGet for existing version
+        if: steps.version.outputs.release == 'true'
+        id: nuget
+        run: |
+          set -euo pipefail
+          version='${{ steps.version.outputs.version }}'
+          versions="$(mktemp)"
+          if curl -fsSL "https://api.nuget.org/v3-flatcontainer/jefftian.id6mail.mcp/index.json" -o "$versions"; then
+            if jq -e --arg v "$version" '.versions | index($v)' "$versions" >/dev/null; then
+              echo "exists=true" >> "$GITHUB_OUTPUT"
+              echo "::notice::JeffTian.Id6Mail.Mcp $version is already on NuGet — skipping push"
+              exit 0
+            fi
+          fi
+          echo "exists=false" >> "$GITHUB_OUTPUT"
+
+      - name: Pack
+        if: steps.version.outputs.release == 'true' && steps.nuget.outputs.exists == 'false'
+        run: |
+          dotnet pack src/Id6Mail.Mcp/Id6Mail.Mcp.csproj \
+            --configuration Release \
+            --output "$GITHUB_WORKSPACE/artifacts" \
+            -p:Version='${{ steps.version.outputs.version }}'
+
+      - name: NuGet login (trusted publishing)
+        if: steps.version.outputs.release == 'true' && steps.nuget.outputs.exists == 'false'
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: Jeff-Tian
+
+      - name: Push to NuGet
+        if: steps.version.outputs.release == 'true' && steps.nuget.outputs.exists == 'false'
+        run: |
+          set -euo pipefail
+          package="$(find "$GITHUB_WORKSPACE/artifacts" -maxdepth 1 -name '*.nupkg' -print -quit 2>/dev/null || true)"
+          if [ -z "$package" ]; then
+            echo "::error::dotnet pack produced no .nupkg in artifacts/"
+            exit 1
+          fi
+          dotnet nuget push "$package" \
+            --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+      - name: Create GitHub release
+        if: steps.version.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version='${{ steps.version.outputs.version }}'
+          tag="v$version"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::notice::Release $tag already exists — nothing to do"
+            exit 0
+          fi
+          package="$(find "$GITHUB_WORKSPACE/artifacts" -maxdepth 1 -name '*.nupkg' -print -quit 2>/dev/null || true)"
+          if [ -z "$package" ]; then
+            dotnet pack src/Id6Mail.Mcp/Id6Mail.Mcp.csproj \
+              --configuration Release \
+              --output "$GITHUB_WORKSPACE/artifacts" \
+              -p:Version="$version"
+            package="$(find "$GITHUB_WORKSPACE/artifacts" -maxdepth 1 -name '*.nupkg' -print -quit)"
+          fi
+          if [ -z "$package" ]; then
+            echo "::error::No .nupkg available for the GitHub release"
+            exit 1
+          fi
+          gh release create "$tag" "$package" \
+            --title "v$version" \
+            --generate-notes \
+            --target "$GITHUB_SHA"

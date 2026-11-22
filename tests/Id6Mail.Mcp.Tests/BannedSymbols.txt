@@ -1,0 +1,4 @@
+M:System.Diagnostics.Process.Start;Launching processes is an external side effect. Inject it and pass a no-op in tests instead of running it.
+M:System.Diagnostics.Process.Start(System.String);Launching processes is an external side effect. Inject it and pass a no-op in tests instead of running it.
+M:System.Diagnostics.Process.Start(System.String,System.String);Launching processes is an external side effect. Inject it and pass a no-op in tests instead of running it.
+M:System.Diagnostics.Process.Start(System.Diagnostics.ProcessStartInfo);Launching processes is an external side effect. Inject it and pass a no-op in tests instead of running it.
