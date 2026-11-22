@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 
 namespace Id6Mail.Mcp;
@@ -31,6 +32,7 @@ public static class SetupCommand
         }
 
         var output = OpenPromptWriter();
+        JoinForegroundProcessGroup();
         try
         {
             output.WriteLine("Add the id6-mail MCP server to:");
@@ -80,12 +82,35 @@ public static class SetupCommand
 
             return failed ? 1 : 0;
         }
+        catch (IOException)
+        {
+            Console.Error.WriteLine("Terminal input is unavailable; run `id6-mail-mcp setup` from a terminal.");
+            return 0;
+        }
         finally
         {
             if (output != Console.Out)
                 output.Dispose();
         }
     }
+
+    // Homebrew runs install steps in a background process group, where reading the
+    // terminal fails with EIO; joining the foreground group makes it readable again.
+    private static void JoinForegroundProcessGroup()
+    {
+        if (OperatingSystem.IsWindows())
+            return;
+
+        var foreground = tcgetpgrp(0);
+        if (foreground > 0)
+            setpgid(0, foreground);
+    }
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int tcgetpgrp(int fd);
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int setpgid(int pid, int pgid);
 
     // Writing to /dev/tty keeps the prompt visible when brew captures stdout.
     private static TextWriter OpenPromptWriter()
