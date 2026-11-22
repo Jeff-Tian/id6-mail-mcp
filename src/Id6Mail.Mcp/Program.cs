@@ -4,6 +4,12 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 
+if (args is ["setup", .. var setupArgs])
+{
+    Environment.ExitCode = SetupCommand.Run(setupArgs);
+    return;
+}
+
 var builder = Host.CreateApplicationBuilder(args);
 
 // stdout carries the MCP JSON-RPC stream; any stray log line on stdout corrupts the session.

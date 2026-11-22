@@ -35,9 +35,19 @@ KQL examples: `id6-mail-mcp`, `subject:deploy`, `from:alerts@example.com`,
 
 ```bash
 dotnet tool install --global JeffTian.Id6Mail.Mcp
-# or, once the formula is published
+# or
 brew install Jeff-Tian/tools/id6-mail-mcp
 ```
+
+With Homebrew, `install` and `upgrade` also run `id6-mail-mcp setup`, which asks
+whether to register the server in **Trae CN**, **Visual Studio Code**, or both.
+Run it again any time:
+
+```bash
+id6-mail-mcp setup
+```
+
+It is skipped when there is no terminal, for example in CI.
 
 ## Auth
 
