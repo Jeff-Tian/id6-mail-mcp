@@ -23,12 +23,14 @@ public static class SetupCommand
             return 1;
         }
 
-        if (!TryOpenTerminal(out var input, out var output, out var tty))
+        // Homebrew runs us with a captured stdout and an empty stdin; only trust a real terminal.
+        if (Console.IsInputRedirected)
         {
             Console.Error.WriteLine("Non-interactive session; run `id6-mail-mcp setup` from a terminal to choose clients.");
             return 0;
         }
 
+        var output = OpenPromptWriter();
         try
         {
             output.WriteLine("Add the id6-mail MCP server to:");
@@ -36,7 +38,7 @@ public static class SetupCommand
                 output.WriteLine($"  {i + 1}) {clients[i].Name}");
             output.Write("Select clients (comma-separated, or 'all'; Enter to skip): ");
 
-            var selected = ParseSelection(input.ReadLine(), clients.Count);
+            var selected = ParseSelection(Console.ReadLine(), clients.Count);
             if (selected.Count == 0)
             {
                 output.WriteLine("Skipped.");
@@ -80,21 +82,19 @@ public static class SetupCommand
         }
         finally
         {
-            tty?.Dispose();
+            if (output != Console.Out)
+                output.Dispose();
         }
     }
 
-    private static bool TryOpenTerminal(out TextReader input, out TextWriter output, out FileStream? tty)
+    // Writing to /dev/tty keeps the prompt visible when brew captures stdout.
+    private static TextWriter OpenPromptWriter()
     {
-        tty = null;
         if (!OperatingSystem.IsWindows())
         {
             try
             {
-                tty = new FileStream("/dev/tty", FileMode.Open, FileAccess.ReadWrite);
-                input = new StreamReader(tty);
-                output = new StreamWriter(tty) { AutoFlush = true };
-                return true;
+                return new StreamWriter(new FileStream("/dev/tty", FileMode.Open, FileAccess.Write)) { AutoFlush = true };
             }
             catch (IOException)
             {
@@ -104,16 +104,7 @@ public static class SetupCommand
             }
         }
 
-        if (!Console.IsInputRedirected)
-        {
-            input = Console.In;
-            output = Console.Out;
-            return true;
-        }
-
-        input = TextReader.Null;
-        output = TextWriter.Null;
-        return false;
+        return Console.Out;
     }
 
     public static IReadOnlyList<int> ParseSelection(string? input, int count)
