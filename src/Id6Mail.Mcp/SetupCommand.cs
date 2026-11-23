@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 
 namespace Id6Mail.Mcp;
@@ -38,9 +39,10 @@ public static class SetupCommand
             output.WriteLine("Add the id6-mail MCP server to:");
             for (var i = 0; i < clients.Count; i++)
                 output.WriteLine($"  {i + 1}) {clients[i].Name}");
-            output.Write("Select clients (comma-separated, or 'all'; Enter to skip): ");
+            output.Write("Select clients (numbers, 'all', or Enter to skip): ");
 
-            var selected = ParseSelection(Console.ReadLine(), clients.Count);
+            EnableLineInput();
+            var selected = ParseSelection(ReadAnswer(), clients.Count);
             if (selected.Count == 0)
             {
                 output.WriteLine("Skipped.");
@@ -82,7 +84,7 @@ public static class SetupCommand
 
             return failed ? 1 : 0;
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             Console.Error.WriteLine("Terminal input is unavailable; run `id6-mail-mcp setup` from a terminal.");
             return 0;
@@ -112,6 +114,51 @@ public static class SetupCommand
     [DllImport("libc", SetLastError = true)]
     private static extern int setpgid(int pid, int pgid);
 
+    [DllImport("libc", SetLastError = true)]
+    private static extern nint read(int fd, byte[] buffer, nint count);
+
+    // brew may leave the terminal in no-echo mode, which hides what the user types.
+    private static void EnableLineInput()
+    {
+        if (OperatingSystem.IsWindows())
+            return;
+
+        try
+        {
+            var startInfo = new ProcessStartInfo("/bin/stty") { UseShellExecute = false };
+            startInfo.ArgumentList.Add("echo");
+            startInfo.ArgumentList.Add("icanon");
+            using var stty = Process.Start(startInfo);
+            stty?.WaitForExit();
+        }
+        catch (IOException)
+        {
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+        }
+    }
+
+    // Console.ReadLine echoes through a terminal handle that is invalid when brew
+    // captures stdout, and FileStream reads a tty via pread; read(2) sidesteps both.
+    private static string? ReadAnswer()
+    {
+        if (OperatingSystem.IsWindows())
+            return Console.ReadLine();
+
+        var bytes = new List<byte>();
+        var buffer = new byte[1];
+        while (read(0, buffer, 1) == 1)
+        {
+            if (buffer[0] == '\n')
+                break;
+            if (buffer[0] != '\r')
+                bytes.Add(buffer[0]);
+        }
+
+        return bytes.Count == 0 ? null : Encoding.UTF8.GetString([.. bytes]);
+    }
+
     // Writing to /dev/tty keeps the prompt visible when brew captures stdout.
     private static TextWriter OpenPromptWriter()
     {
@@ -138,7 +185,7 @@ public static class SetupCommand
             return [];
 
         var text = input.Trim();
-        if (text.Equals("all", StringComparison.OrdinalIgnoreCase))
+        if (text.Equals("all", StringComparison.OrdinalIgnoreCase) || text == "*")
             return Enumerable.Range(0, count).ToArray();
 
         var result = new List<int>();

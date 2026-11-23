@@ -15,6 +15,7 @@ public class SetupCommandTests
     public void ParseSelection_All()
     {
         Assert.Equal([0, 1], SetupCommand.ParseSelection("all", 2));
+        Assert.Equal([0, 1], SetupCommand.ParseSelection("*", 2));
     }
 
     [Fact]
