@@ -17,5 +17,5 @@ public sealed class Id6Settings
 
     public string ClientId => "id6-mail-mcp";
 
-    public string Scope => "openid profile email mail.read IdentityServerApi";
+    public string Scope => "openid profile email mail.read mail.write IdentityServerApi";
 }

@@ -13,8 +13,8 @@
         <PackageId>JeffTian.Id6Mail.Mcp</PackageId>
         <Version>0.1.0</Version>
         <Authors>Jeff Tian</Authors>
-        <Title>id6 Mail MCP - Outlook mail search for AI agents</Title>
-        <Description>Local stdio MCP server that lets AI agents search and read the signed-in user's Outlook mailbox through id6. Read-only tools (search_mail, get_mail), Microsoft Search KQL, public-client device-flow auth, no client secret, per-user mailbox binding.</Description>
+        <Title>id6 Mail MCP - Outlook mail search and delete for AI agents</Title>
+        <Description>Local stdio MCP server that lets AI agents search, read and soft-delete the signed-in user's Outlook mailbox through id6. Tools: search_mail, get_mail, delete_mail (moves one message to Deleted Items), Microsoft Search KQL, public-client device-flow auth, no client secret, per-user mailbox binding.</Description>
         <PackageLicenseExpression>MIT</PackageLicenseExpression>
         <PackageProjectUrl>https://github.com/Jeff-Tian/id6-mail-mcp</PackageProjectUrl>
         <RepositoryUrl>https://github.com/Jeff-Tian/id6-mail-mcp</RepositoryUrl>

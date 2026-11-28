@@ -12,23 +12,29 @@ public class Id6MailClientTests : IDisposable
 
     private sealed class StubHandler : HttpMessageHandler
     {
-        private readonly HttpStatusCode _status;
-        private readonly string _body;
+        private readonly Queue<(HttpStatusCode Status, string Body)> _responses;
 
         public StubHandler(HttpStatusCode status, string body)
+            : this(new[] { (status, body) })
         {
-            _status = status;
-            _body = body;
+        }
+
+        public StubHandler(params (HttpStatusCode Status, string Body)[] responses)
+        {
+            _responses = new Queue<(HttpStatusCode, string)>(responses);
         }
 
         public HttpRequestMessage? LastRequest { get; private set; }
+        public List<HttpRequestMessage> Requests { get; } = [];
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             LastRequest = request;
-            return Task.FromResult(new HttpResponseMessage(_status)
+            Requests.Add(request);
+            var (status, body) = _responses.Count > 1 ? _responses.Dequeue() : _responses.Peek();
+            return Task.FromResult(new HttpResponseMessage(status)
             {
-                Content = new StringContent(_body, Encoding.UTF8, "application/json"),
+                Content = new StringContent(body, Encoding.UTF8, "application/json"),
             });
         }
     }
@@ -66,6 +72,62 @@ public class Id6MailClientTests : IDisposable
         await client.GetAsync("m/1", default);
 
         Assert.Equal("https://id6.test/api/v1/agent/mail/m%2F1", handler.LastRequest!.RequestUri!.OriginalString);
+    }
+
+    [Fact]
+    public async Task Delete_UsesDeleteAndEscapesMessageId()
+    {
+        var handler = new StubHandler(HttpStatusCode.OK, """{"status":"deleted","id":"m/1"}""");
+        var client = CreateClient(handler);
+
+        var body = await client.DeleteAsync("m/1", default);
+
+        Assert.Contains("deleted", body);
+        Assert.Equal(HttpMethod.Delete, handler.LastRequest!.Method);
+        Assert.Equal("https://id6.test/api/v1/agent/mail/m%2F1", handler.LastRequest.RequestUri!.OriginalString);
+        Assert.Equal("cached-at", handler.LastRequest.Headers.Authorization!.Parameter);
+    }
+
+    [Fact]
+    public async Task DeleteMail_RefusesSubjectMismatch()
+    {
+        var handler = new StubHandler(
+            (HttpStatusCode.OK, """{"id":"m1","subject":"Real subject"}"""),
+            (HttpStatusCode.OK, """{"status":"deleted","id":"m1"}"""));
+        var tools = new MailTools(CreateClient(handler));
+
+        var body = await tools.DeleteMailAsync("m1", "Wrong subject", default);
+
+        Assert.Contains("subject_mismatch", body);
+        Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Get, handler.Requests[0].Method);
+    }
+
+    [Fact]
+    public async Task DeleteMail_DeletesWhenSubjectMatches()
+    {
+        var handler = new StubHandler(
+            (HttpStatusCode.OK, """{"id":"m1","subject":"Real subject"}"""),
+            (HttpStatusCode.OK, """{"status":"deleted","id":"m1"}"""));
+        var tools = new MailTools(CreateClient(handler));
+
+        var body = await tools.DeleteMailAsync("m1", "Real subject", default);
+
+        Assert.Contains("deleted", body);
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Equal(HttpMethod.Delete, handler.Requests[1].Method);
+    }
+
+    [Fact]
+    public async Task DeleteMail_ReturnsNonMessagePayloadWithoutDeleting()
+    {
+        var handler = new StubHandler(HttpStatusCode.Conflict, """{"error":"mail_not_connected"}""");
+        var tools = new MailTools(CreateClient(handler));
+
+        var body = await tools.DeleteMailAsync("m1", "Whatever", default);
+
+        Assert.Contains("outlook_not_connected", body);
+        Assert.Single(handler.Requests);
     }
 
     [Fact]

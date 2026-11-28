@@ -16,12 +16,18 @@ public sealed class Id6MailClient(HttpClient http, DeviceFlowAuth auth, Id6Setti
     public Task<string> GetAsync(string id, CancellationToken cancellationToken) =>
         SendAsync($"/api/v1/agent/mail/{Uri.EscapeDataString(id)}", cancellationToken);
 
-    private async Task<string> SendAsync(string path, CancellationToken cancellationToken)
+    public Task<string> DeleteAsync(string id, CancellationToken cancellationToken) =>
+        SendAsync($"/api/v1/agent/mail/{Uri.EscapeDataString(id)}", cancellationToken, HttpMethod.Delete);
+
+    private async Task<string> SendAsync(
+        string path,
+        CancellationToken cancellationToken,
+        HttpMethod? method = null)
     {
         // Throws LoginRequiredException; the tool layer turns it into a user action.
         var accessToken = await auth.GetAccessTokenAsync(cancellationToken);
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, settings.BaseUrl + path);
+        using var request = new HttpRequestMessage(method ?? HttpMethod.Get, settings.BaseUrl + path);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 

@@ -49,6 +49,62 @@ public sealed class MailTools(Id6MailClient client)
         }
     }
 
+    [McpServerTool(Name = "delete_mail", Destructive = true)]
+    [Description("Delete one Outlook message by id. It moves to Deleted Items (soft delete). " +
+                 "Call only after the user explicitly approves deleting this exact message. " +
+                 "Pass the subject you showed the user as expected_subject; the tool refuses if it " +
+                 "does not match the stored message.")]
+    public async Task<string> DeleteMailAsync(
+        [Description("Message id returned by search_mail or get_mail")]
+        string id,
+        [Description("Exact subject the user approved; a mismatch aborts the delete")]
+        string expectedSubject,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var existing = await client.GetAsync(id, cancellationToken);
+            var actual = ReadSubject(existing);
+            if (actual is null)
+            {
+                // Not a message payload (login_required / outlook_not_connected) or not JSON.
+                return existing;
+            }
+
+            if (!string.Equals(actual.Trim(), expectedSubject.Trim(), StringComparison.Ordinal))
+            {
+                return JsonSerializer.Serialize(new
+                {
+                    status = "subject_mismatch",
+                    message = "The stored message subject does not match expected_subject; nothing was deleted.",
+                    actual_subject = actual,
+                }, JsonOptions);
+            }
+
+            return await client.DeleteAsync(id, cancellationToken);
+        }
+        catch (LoginRequiredException ex)
+        {
+            return LoginRequired(ex.Pending);
+        }
+    }
+
+    private static string? ReadSubject(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.TryGetProperty("subject", out var subject) &&
+                   subject.ValueKind == JsonValueKind.String
+                ? subject.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     private static string LoginRequired(PendingLogin pending) => JsonSerializer.Serialize(new
     {
         status = "login_required",
